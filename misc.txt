@@ -1,0 +1,4 @@
+= tinyxml2 =
+c483646db00a6a9ac3a8e93f7c490aecb589979d
+= gittest_selfup_ns =
+3dc3d4d396bcfb07fba01665944faf5e4101e8ec

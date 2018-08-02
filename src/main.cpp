@@ -7,6 +7,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -114,7 +115,6 @@ public:
 		float bas_bound = m_bound;
 		float bas_top = 0, bas_left = 0;
 		QuadNode *node = m_root.get();
-		// descend thru nodes from bas_bound to inc_bound
 		XASRT(bas_bound >= inc_bound);
 		while (bas_bound != inc_bound) {
 			bas_bound /= 2;
@@ -128,6 +128,49 @@ public:
 			bas_left += inc_x < midX ? 0 : bas_bound;
 		}
 		return node;
+	}
+
+	QuadNode * _descendToHarvestNocreate(float inc_bound, float inc_x, float inc_y, std::set<EntCol *> *cols)
+	{
+		float bas_bound = m_bound;
+		float bas_top = 0, bas_left = 0;
+		QuadNode *node = m_root.get();
+		XASRT(bas_bound >= inc_bound);
+		while (bas_bound != inc_bound) {
+			bas_bound /= 2;
+			const float midY = bas_top + bas_bound;
+			const float midX = bas_left + bas_bound;
+			const size_t nodeidx = (inc_y < midY ? 0 : 2) + (inc_x < midX ? 0 : 1);
+			// harvest
+			for (auto it = node->m_entry.begin(); it != node->m_entry.end(); ++it)
+				cols->insert(it->first.get());
+			if (! node->m_node[nodeidx])
+				break;
+			// nocreate - probably should be an XASRT(0) instead of break ?
+			node = node->m_node[nodeidx].get();
+			bas_top += inc_y < midY ? 0 : bas_bound;
+			bas_left += inc_x < midX ? 0 : bas_bound;
+		}
+		return node;
+	}
+
+	void _floodHarvestNocreate(QuadNode *node, std::set<EntCol *> *cols)
+	{
+		if (! node)
+			return;
+		for (auto it = node->m_entry.begin(); it != node->m_entry.end(); ++it)
+			cols->insert(it->first.get());
+		for (size_t i = 0; i < 4; i++)
+			_floodHarvestNocreate(node->m_node[i].get(), cols);
+	}
+
+	float _computeIncBound(const Rectf &r)
+	{
+		XASRT(_boundContains(r));
+		const float maxside = GS_MAX(r.width, r.height);
+		const float rank_ = truncf(log2f(maxside));
+		const float inc_bound = exp2f(rank_);
+		return inc_bound;
 	}
 
 	void remove(const sp<EntCol> &ent)
@@ -145,10 +188,7 @@ public:
 
 	void insert(const sp<EntCol> &ent, const Rectf &r)
 	{
-		XASRT(_boundContains(r));
-		const float maxside = GS_MAX(r.width, r.height);
-		const float rank_ = truncf(log2f(maxside));		
-		const float inc_bound = exp2f(rank_);
+		const float inc_bound = _computeIncBound(r);
 		// nodes may have duplicates
 		QuadNode *nodes[4] = {
 			_descendTo(inc_bound, r.left, r.top),            _descendTo(inc_bound, r.left + r.width, r.top),
@@ -156,6 +196,46 @@ public:
 		};
 		for (size_t i = 0; i < 4; i++)
 			nodes[i]->m_entry[ent] = 0;
+	}
+
+	void check2_(
+		const sp<QuadNode> &node,
+		float bas_bound_this, float bas_top, float bas_left,
+		const Rectf &r, std::set<EntCol *> *cols)
+	{
+		for (auto it = node->m_entry.begin(); it != node->m_entry.end(); ++it)
+			cols->insert(it->first.get());
+		const float bas_bound = bas_bound_this / 2;
+		const float midY = bas_top + bas_bound;
+		const float midX = bas_left + bas_bound;
+		Rectf noderects[4] = {
+			Rectf(bas_left, bas_top, bas_bound, bas_bound), Rectf(midX, bas_top, bas_bound, bas_bound),
+			Rectf(bas_left, midY, bas_bound, bas_bound), Rectf(midX, midY, bas_bound, bas_bound),
+		};
+		for (size_t i = 0; i < 4; i++) {
+			if (! node->m_node[i])
+				continue;
+			if (noderects[i].contains(r.left, r.top))
+				check_(node->m_node[i], bas_bound, r.top, r.left, r, cols);
+			else if (noderects[i].contains(r.left + r.width, r.top))
+				check_(node->m_node[i], bas_bound, r.top, r.left + r.width, r, cols);
+			else if (noderects[i].contains(r.left, r.top + r.height))
+				check_(node->m_node[i], bas_bound, r.top + r.height, r.left, r, cols);
+			else if (noderects[i].contains(r.left + r.width, r.top + r.height))
+				check_(node->m_node[i], bas_bound, r.top + r.height, r.left + r.width, r, cols);
+		}
+	}
+
+	void check(const Rectf &r)
+	{
+		std::set<EntCol *> cols;
+		const float inc_bound = _computeIncBound(r);
+		QuadNode *nodes[4] = {
+			_descendToHarvestNocreate(inc_bound, r.left, r.top, &cols), _descendToHarvestNocreate(inc_bound, r.left + r.width, r.top, &cols),
+			_descendToHarvestNocreate(inc_bound, r.left, r.top + r.height, &cols), _descendToHarvestNocreate(inc_bound, r.left + r.width, r.top + r.height, &cols),
+		};
+		for (size_t i = 0; i < 4; i++)
+			_floodHarvestNocreate(nodes[i], &cols);
 	}
 };
 

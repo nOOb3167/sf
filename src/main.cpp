@@ -61,6 +61,19 @@ public:
 	virtual Tri* colTri(size_t a) = 0;
 };
 
+class E1 : public EntCol
+{
+public:
+	Tri t;
+	virtual Tri* colTri(size_t a) override
+	{
+		t.d[0] = sf::Vector2f(0, 0);
+		t.d[1] = sf::Vector2f(200, 0);
+		t.d[2] = sf::Vector2f(200, 200);
+		return a == 0 ? &t : nullptr;
+	}
+};
+
 class QuadNode
 {
 public:
@@ -80,16 +93,13 @@ class QuadTree
 {
 public:
 	float m_bound;
-	float m_rank;
 	sp<QuadNode> m_root;
 	std::map<sp<EntCol>, QuadNode4> m_ents;
 
 	QuadTree(float bound) :
 		m_bound(bound),
-		m_rank(log2f(bound))
-	{
-		XASRT(m_rank == truncf(m_rank));
-	}
+		m_root(new QuadNode())
+	{}
 
 	bool _boundContains(const Rectf &r)
 	{
@@ -110,7 +120,10 @@ public:
 			bas_bound /= 2;
 			const float midY = bas_top + bas_bound;
 			const float midX = bas_left + bas_bound;
-			node = node->m_node[(inc_y < midY ? 0 : 2) + (inc_x < midX ? 0 : 1)].get();
+			const size_t nodeidx = (inc_y < midY ? 0 : 2) + (inc_x < midX ? 0 : 1);
+			if (! node->m_node[nodeidx])
+				node->m_node[nodeidx] = sp<QuadNode>(new QuadNode());
+			node = node->m_node[nodeidx].get();
 			bas_top += inc_y < midY ? 0 : bas_bound;
 			bas_left += inc_x < midX ? 0 : bas_bound;
 		}
@@ -136,23 +149,13 @@ public:
 		const float maxside = GS_MAX(r.width, r.height);
 		const float rank_ = truncf(log2f(maxside));		
 		const float inc_bound = exp2f(rank_);
-
+		// nodes may have duplicates
 		QuadNode *nodes[4] = {
 			_descendTo(inc_bound, r.left, r.top),            _descendTo(inc_bound, r.left + r.width, r.top),
 			_descendTo(inc_bound, r.left, r.top + r.height), _descendTo(inc_bound, r.left + r.width, r.top + r.height),
 		};
-		QuadNode *uniq[4] = {};
-		size_t idx = 0;
-		for (size_t i = 0; i < 4; i++) {
-			for (size_t j = 0; j < idx; j++)
-				if (nodes[i] == uniq[j])
-					goto cnt;
-			uniq[idx++] = nodes[i];
-		cnt:
-			(void)0;
-		}
-		for (size_t i = 0; i < idx; i++)
-			uniq[i]->m_entry[ent] = 0;
+		for (size_t i = 0; i < 4; i++)
+			nodes[i]->m_entry[ent] = 0;
 	}
 };
 
@@ -322,6 +325,10 @@ int main(int argc, char **argv)
 	std::vector<Tri>          doc_tris = xml_ds_to_tris(doc_d);
 
 	std::vector<sf::Vertex> verts = verts_from_tris(doc_tris);
+
+	sp<QuadTree> qt(new QuadTree(256));
+	sp<E1> e1(new E1());
+	qt->insert(e1, Rectf(0, 0, 200, 200));
 
 	sf::RenderWindow window(sf::VideoMode(800, 600), "SF");
 

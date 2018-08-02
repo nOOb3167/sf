@@ -198,34 +198,6 @@ public:
 			nodes[i]->m_entry[ent] = 0;
 	}
 
-	void check2_(
-		const sp<QuadNode> &node,
-		float bas_bound_this, float bas_top, float bas_left,
-		const Rectf &r, std::set<EntCol *> *cols)
-	{
-		for (auto it = node->m_entry.begin(); it != node->m_entry.end(); ++it)
-			cols->insert(it->first.get());
-		const float bas_bound = bas_bound_this / 2;
-		const float midY = bas_top + bas_bound;
-		const float midX = bas_left + bas_bound;
-		Rectf noderects[4] = {
-			Rectf(bas_left, bas_top, bas_bound, bas_bound), Rectf(midX, bas_top, bas_bound, bas_bound),
-			Rectf(bas_left, midY, bas_bound, bas_bound), Rectf(midX, midY, bas_bound, bas_bound),
-		};
-		for (size_t i = 0; i < 4; i++) {
-			if (! node->m_node[i])
-				continue;
-			if (noderects[i].contains(r.left, r.top))
-				check_(node->m_node[i], bas_bound, r.top, r.left, r, cols);
-			else if (noderects[i].contains(r.left + r.width, r.top))
-				check_(node->m_node[i], bas_bound, r.top, r.left + r.width, r, cols);
-			else if (noderects[i].contains(r.left, r.top + r.height))
-				check_(node->m_node[i], bas_bound, r.top + r.height, r.left, r, cols);
-			else if (noderects[i].contains(r.left + r.width, r.top + r.height))
-				check_(node->m_node[i], bas_bound, r.top + r.height, r.left + r.width, r, cols);
-		}
-	}
-
 	void check(const Rectf &r)
 	{
 		std::set<EntCol *> cols;

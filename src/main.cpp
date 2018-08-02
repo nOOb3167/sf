@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <memory>
 #include <set>
@@ -110,7 +111,7 @@ public:
 		return false;
 	}
 
-	QuadNode * _descendTo(float inc_bound, float inc_x, float inc_y)
+	QuadNode * _descendToEx(float inc_bound, float inc_x, float inc_y, const std::function<void(QuadNode *)> &cbextra, const std::function<sp<QuadNode>()> &cbnull)
 	{
 		float bas_bound = m_bound;
 		float bas_top = 0, bas_left = 0;
@@ -121,8 +122,13 @@ public:
 			const float midY = bas_top + bas_bound;
 			const float midX = bas_left + bas_bound;
 			const size_t nodeidx = (inc_y < midY ? 0 : 2) + (inc_x < midX ? 0 : 1);
+			if (cbextra)
+				cbextra(node);
+			if (cbnull && ! node->m_node[nodeidx])
+				node->m_node[nodeidx] = cbnull();
+			// FIXME: probably should be an XASRT(0) ?
 			if (! node->m_node[nodeidx])
-				node->m_node[nodeidx] = sp<QuadNode>(new QuadNode());
+				return nullptr;
 			node = node->m_node[nodeidx].get();
 			bas_top += inc_y < midY ? 0 : bas_bound;
 			bas_left += inc_x < midX ? 0 : bas_bound;
@@ -130,28 +136,23 @@ public:
 		return node;
 	}
 
+	QuadNode * _descendTo(float inc_bound, float inc_x, float inc_y)
+	{
+		return _descendToEx(inc_bound, inc_x, inc_y,
+			nullptr,
+			[&]() {
+				return std::make_shared<QuadNode>();
+			});
+	}
+
 	QuadNode * _descendToHarvestNocreate(float inc_bound, float inc_x, float inc_y, std::set<EntCol *> *cols)
 	{
-		float bas_bound = m_bound;
-		float bas_top = 0, bas_left = 0;
-		QuadNode *node = m_root.get();
-		XASRT(bas_bound >= inc_bound);
-		while (bas_bound != inc_bound) {
-			bas_bound /= 2;
-			const float midY = bas_top + bas_bound;
-			const float midX = bas_left + bas_bound;
-			const size_t nodeidx = (inc_y < midY ? 0 : 2) + (inc_x < midX ? 0 : 1);
-			// harvest
-			for (auto it = node->m_entry.begin(); it != node->m_entry.end(); ++it)
-				cols->insert(it->first.get());
-			if (! node->m_node[nodeidx])
-				break;
-			// nocreate - probably should be an XASRT(0) instead of break ?
-			node = node->m_node[nodeidx].get();
-			bas_top += inc_y < midY ? 0 : bas_bound;
-			bas_left += inc_x < midX ? 0 : bas_bound;
-		}
-		return node;
+		return _descendToEx(inc_bound, inc_x, inc_y,
+			[&](QuadNode *node) {
+				for (auto it = node->m_entry.begin(); it != node->m_entry.end(); ++it)
+					cols->insert(it->first.get());
+			},
+			nullptr);
 	}
 
 	void _floodHarvestNocreate(QuadNode *node, std::set<EntCol *> *cols)

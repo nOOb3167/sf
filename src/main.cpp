@@ -1,3 +1,4 @@
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -15,6 +16,7 @@
 #include <tinyxml2/tinyxml2.h>
 
 #include <selfup/ns_filesys.h>
+#include <selfup/ns_helpers.h>
 
 #define XASRT(b) do { if (! (b)) throw ErrExc(); } while (0)
 
@@ -36,6 +38,8 @@ using namespace tinyxml2;
 template<typename T>
 using sp = ::std::shared_ptr<T>;
 
+typedef sf::Rect<float> Rectf;
+
 class ErrExc : std::runtime_error
 {
 public:
@@ -48,6 +52,106 @@ class Tri
 {
 public:
 	sf::Vector2f d[3] = {};
+};
+
+class QuadNode
+{
+public:
+	// |0 1|
+	// |2 3|
+	sp<QuadNode> m_node[4];
+};
+
+class QuadTree
+{
+public:
+	float m_bound;
+	float m_rank;
+	sp<QuadNode> m_root;
+
+	QuadTree(float bound) :
+		m_bound(bound),
+		m_rank(log2f(bound))
+	{
+		XASRT(m_rank == truncf(m_rank));
+	}
+
+	bool _bound_contains(const Rectf &r)
+	{
+		if (r.left >= 0 && r.left + r.width < m_bound &&
+			r.top >= 0 && r.top + r.height < m_bound)
+			return true;
+		return false;
+	}
+
+	QuadNode * descendTo(size_t inc_bound, float inc_x, float inc_y)
+	{
+		size_t bas_bound = m_bound;
+		float bas_top = 0, bas_left = 0;
+		QuadNode *node = m_root.get();
+		// descend thru nodes from bas_bound to inc_bound
+		while (bas_bound != inc_bound) {
+			bas_bound /= 2;
+			const float midY = bas_top + bas_bound;
+			const float midX = bas_left + bas_bound;
+			node = node->m_node[(inc_y < midY ? 0 : 2) + (inc_x < midX ? 0 : 1)].get();
+			bas_top += inc_y < midY ? 0 : bas_bound;
+			bas_left += inc_x < midX ? 0 : bas_bound;
+		}
+		return node;
+	}
+
+	void insert(const Rectf &r)
+	{
+		XASRT(_bound_contains(r));
+		const size_t maxside = GS_MAX(r.width, r.height);
+		const size_t rank_ = truncf(log2f(maxside));
+		XASRT(m_rank > rank_);
+		const size_t rank = m_rank - rank_;
+
+		//QuadNode *ul = m_root.get();
+		QuadNode *parent = nullptr;
+		for (size_t i = 0; i < rank; i++) {
+
+		}
+
+		//
+
+		size_t inc_bound = exp2f(rank_);
+		size_t bas_bound = m_bound;
+		// descend thru nodes from bas_bound to inc_bound
+		Rectf bas_r(0, 0, m_bound, m_bound);
+		QuadNode *ul = m_root.get();
+		QuadNode *ul_parent = nullptr;
+		while (bas_bound != inc_bound) {
+			const float midY = bas_r.top + bas_r.height / 2;
+			const float midX = bas_r.left + bas_r.width / 2;
+			ul_parent = ul;
+			ul = ul->m_node[(r.top < midY ? 0 : 2) + (r.left < midX ? 0 : 1)].get();
+			bas_r.top += r.top < midY ? 0 : bas_r.height / 2;
+			bas_r.left += r.left < midX ? 0 : bas_r.width / 2;
+			bas_r.height /= 2;
+			bas_r.width /= 2;
+			bas_bound /= 2;
+		}
+
+		//
+		size_t inc_bound = exp2f(rank_);
+		size_t bas_bound = m_bound;
+		float bas_top = 0, bas_left = 0;
+		QuadNode *ul = m_root.get();
+		QuadNode *ul_parent = nullptr;
+		// descend thru nodes from bas_bound to inc_bound
+		while (bas_bound != inc_bound) {
+			bas_bound /= 2;
+			const float midY = bas_top + bas_bound;
+			const float midX = bas_left + bas_bound;
+			ul_parent = ul;
+			ul = ul->m_node[(r.top < midY ? 0 : 2) + (r.left < midX ? 0 : 1)].get();
+			bas_top += r.top < midY ? 0 : bas_bound;
+			bas_left += r.left < midX ? 0 : bas_bound;
+		}
+	}
 };
 
 // FIXME:

@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -54,12 +55,25 @@ public:
 	sf::Vector2f d[3] = {};
 };
 
+class EntCol
+{
+public:
+	virtual Tri* colTri(size_t a) = 0;
+};
+
 class QuadNode
 {
 public:
 	// |0 1|
 	// |2 3|
-	sp<QuadNode> m_node[4];
+	sp<QuadNode> m_node[4] = {};
+	std::map<sp<EntCol>, size_t> m_entry;
+};
+
+class QuadNode4
+{
+public:
+	sp<QuadNode> m_d[4] = {};
 };
 
 class QuadTree
@@ -68,6 +82,7 @@ public:
 	float m_bound;
 	float m_rank;
 	sp<QuadNode> m_root;
+	std::map<sp<EntCol>, QuadNode4> m_ents;
 
 	QuadTree(float bound) :
 		m_bound(bound),
@@ -76,7 +91,7 @@ public:
 		XASRT(m_rank == truncf(m_rank));
 	}
 
-	bool _bound_contains(const Rectf &r)
+	bool _boundContains(const Rectf &r)
 	{
 		if (r.left >= 0 && r.left + r.width < m_bound &&
 			r.top >= 0 && r.top + r.height < m_bound)
@@ -84,12 +99,13 @@ public:
 		return false;
 	}
 
-	QuadNode * descendTo(size_t inc_bound, float inc_x, float inc_y)
+	QuadNode * _descendTo(float inc_bound, float inc_x, float inc_y)
 	{
-		size_t bas_bound = m_bound;
+		float bas_bound = m_bound;
 		float bas_top = 0, bas_left = 0;
 		QuadNode *node = m_root.get();
 		// descend thru nodes from bas_bound to inc_bound
+		XASRT(bas_bound >= inc_bound);
 		while (bas_bound != inc_bound) {
 			bas_bound /= 2;
 			const float midY = bas_top + bas_bound;
@@ -101,56 +117,42 @@ public:
 		return node;
 	}
 
-	void insert(const Rectf &r)
+	void remove(const sp<EntCol> &ent)
 	{
-		XASRT(_bound_contains(r));
-		const size_t maxside = GS_MAX(r.width, r.height);
-		const size_t rank_ = truncf(log2f(maxside));
-		XASRT(m_rank > rank_);
-		const size_t rank = m_rank - rank_;
-
-		//QuadNode *ul = m_root.get();
-		QuadNode *parent = nullptr;
-		for (size_t i = 0; i < rank; i++) {
-
+		auto it = m_ents.find(ent);
+		if (it == m_ents.end())
+			return;
+		for (size_t i = 0; i < 4; i++) {
+			if (! it->second.m_d[i])
+				break;
+			if (it->second.m_d[i]->m_entry.erase(ent) != 1)
+				XASRT(0);
 		}
+	}
 
-		//
+	void insert(const sp<EntCol> &ent, const Rectf &r)
+	{
+		XASRT(_boundContains(r));
+		const float maxside = GS_MAX(r.width, r.height);
+		const float rank_ = truncf(log2f(maxside));		
+		const float inc_bound = exp2f(rank_);
 
-		size_t inc_bound = exp2f(rank_);
-		size_t bas_bound = m_bound;
-		// descend thru nodes from bas_bound to inc_bound
-		Rectf bas_r(0, 0, m_bound, m_bound);
-		QuadNode *ul = m_root.get();
-		QuadNode *ul_parent = nullptr;
-		while (bas_bound != inc_bound) {
-			const float midY = bas_r.top + bas_r.height / 2;
-			const float midX = bas_r.left + bas_r.width / 2;
-			ul_parent = ul;
-			ul = ul->m_node[(r.top < midY ? 0 : 2) + (r.left < midX ? 0 : 1)].get();
-			bas_r.top += r.top < midY ? 0 : bas_r.height / 2;
-			bas_r.left += r.left < midX ? 0 : bas_r.width / 2;
-			bas_r.height /= 2;
-			bas_r.width /= 2;
-			bas_bound /= 2;
+		QuadNode *nodes[4] = {
+			_descendTo(inc_bound, r.left, r.top),            _descendTo(inc_bound, r.left + r.width, r.top),
+			_descendTo(inc_bound, r.left, r.top + r.height), _descendTo(inc_bound, r.left + r.width, r.top + r.height),
+		};
+		QuadNode *uniq[4] = {};
+		size_t idx = 0;
+		for (size_t i = 0; i < 4; i++) {
+			for (size_t j = 0; j < idx; j++)
+				if (nodes[i] == uniq[j])
+					goto cnt;
+			uniq[idx++] = nodes[i];
+		cnt:
+			(void)0;
 		}
-
-		//
-		size_t inc_bound = exp2f(rank_);
-		size_t bas_bound = m_bound;
-		float bas_top = 0, bas_left = 0;
-		QuadNode *ul = m_root.get();
-		QuadNode *ul_parent = nullptr;
-		// descend thru nodes from bas_bound to inc_bound
-		while (bas_bound != inc_bound) {
-			bas_bound /= 2;
-			const float midY = bas_top + bas_bound;
-			const float midX = bas_left + bas_bound;
-			ul_parent = ul;
-			ul = ul->m_node[(r.top < midY ? 0 : 2) + (r.left < midX ? 0 : 1)].get();
-			bas_top += r.top < midY ? 0 : bas_bound;
-			bas_left += r.left < midX ? 0 : bas_bound;
-		}
+		for (size_t i = 0; i < idx; i++)
+			uniq[i]->m_entry[ent] = 0;
 	}
 };
 
@@ -169,21 +171,21 @@ std::string killslash(const std::string &path)
 std::string resource_path_find()
 {
 	const std::string &name = "misc.txt";
-const std::string &curdir = ns_filesys::current_executable_directory();
-const std::string &up0dir = killslash(curdir);
-const std::string &up1dir = killslash(ns_filesys::path_directory(up0dir));
-const std::string &up2dir = killslash(ns_filesys::path_directory(up1dir));
-std::fstream fs0(ns_filesys::path_append_abs_rel(up0dir, name), std::ios_base::in | std::ios_base::binary);
-std::fstream fs1(ns_filesys::path_append_abs_rel(up1dir, name), std::ios_base::in | std::ios_base::binary);
-std::fstream fs2(ns_filesys::path_append_abs_rel(up2dir, name), std::ios_base::in | std::ios_base::binary);
-if (fs0.good())
-return up0dir;
-else if (fs1.good())
-return up1dir;
-else if (fs2.good())
-return up2dir;
-else
-throw FilesysExc("resource path not found");
+	const std::string &curdir = ns_filesys::current_executable_directory();
+	const std::string &up0dir = killslash(curdir);
+	const std::string &up1dir = killslash(ns_filesys::path_directory(up0dir));
+	const std::string &up2dir = killslash(ns_filesys::path_directory(up1dir));
+	std::fstream fs0(ns_filesys::path_append_abs_rel(up0dir, name), std::ios_base::in | std::ios_base::binary);
+	std::fstream fs1(ns_filesys::path_append_abs_rel(up1dir, name), std::ios_base::in | std::ios_base::binary);
+	std::fstream fs2(ns_filesys::path_append_abs_rel(up2dir, name), std::ios_base::in | std::ios_base::binary);
+	if (fs0.good())
+		return up0dir;
+	else if (fs1.good())
+		return up1dir;
+	else if (fs2.good())
+		return up2dir;
+	else
+		throw FilesysExc("resource path not found");
 }
 
 std::vector<XMLElement *> xml_child_sibling_find_all(XMLElement *e, const char *n)

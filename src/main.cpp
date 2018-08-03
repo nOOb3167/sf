@@ -197,7 +197,7 @@ public:
 	{
 		XASRT(_boundContains(r));
 		const float maxside = GS_MAX(r.width, r.height);
-		const float rank_ = truncf(log2f(maxside));
+		const float rank_ = ceil(log2f(maxside));
 		const float inc_bound = exp2f(rank_);
 		return inc_bound;
 	}

@@ -36,6 +36,7 @@
 // https://stackoverflow.com/questions/1380371/what-are-the-most-widely-used-c-vector-matrix-math-linear-algebra-libraries-a#1452950
 //   yay all vector libraries suck
 // https://gamedevelopment.tutsplus.com/tutorials/collision-detection-using-the-separating-axis-theorem--gamedev-169
+// (((!!isect)/2.0f)+0.5f)
 
 using namespace tinyxml2;
 
@@ -55,6 +56,25 @@ public:
 class Tri
 {
 public:
+	Tri translatedBy(const sf::Vector2f &a)
+	{
+		Tri t;
+		for (size_t i = 0; i < 3; i++)
+			t.d[i] = d[i] + a;
+		return t;
+	}
+
+	Rectf colRect()
+	{
+		const float mx = GS_MIN(d[0].x, GS_MIN(d[1].x, d[2].x));
+		const float Mx = GS_MAX(d[0].x, GS_MAX(d[1].x, d[2].x));
+		const float my = GS_MIN(d[0].y, GS_MIN(d[1].y, d[2].y));
+		const float My = GS_MAX(d[0].y, GS_MAX(d[1].y, d[2].y));
+		Rectf r(mx, my, Mx - mx, My - my);
+		return r;
+	}
+
+public:
 	sf::Vector2f d[3] = {};
 };
 
@@ -67,14 +87,21 @@ public:
 class E1 : public EntCol
 {
 public:
-	Tri t;
+	E1(const sf::Vector2f &a, const sf::Vector2f &b, const sf::Vector2f &c) :
+		m_t()
+	{
+		m_t.d[0] = a;
+		m_t.d[1] = b;
+		m_t.d[2] = c;
+	}
+
 	virtual Tri* colTri(size_t a) override
 	{
-		t.d[0] = sf::Vector2f(0, 0);
-		t.d[1] = sf::Vector2f(200, 0);
-		t.d[2] = sf::Vector2f(200, 200);
-		return a == 0 ? &t : nullptr;
+		return a == 0 ? &m_t : nullptr;
 	}
+
+public:
+	Tri m_t;
 };
 
 class QuadNode
@@ -403,19 +430,16 @@ int main(int argc, char **argv)
 
 	std::vector<sf::Vertex> verts = verts_from_tris(doc_tris);
 
-	sp<QuadTree> qt(new QuadTree(256));
-	sp<E1> e1(new E1());
-	qt->insert(e1, Rectf(0, 0, 200, 200));
-	std::set<EntCol *> cols1;
-	//qt->check(Rectf(0, 0, 200, 200), &cols1);
-	qt->check(Rectf(0, 200, 5, 5), &cols1);
-
+	sp<QuadTree> qt(new QuadTree(1024));
+	
+	for (size_t i = 0; i < doc_tris.size(); i++) {
+		sp<E1> e1(new E1(doc_tris[i].d[0], doc_tris[i].d[1], doc_tris[i].d[2]));
+		qt->insert(e1, e1->m_t.colRect());
+	}
+	
 	sf::RenderWindow window(sf::VideoMode(800, 600), "SF");
 
 	window.setMouseCursorGrabbed(true);
-
-	sf::RectangleShape shape(sf::Vector2f(16, 16));
-	shape.setFillColor(sf::Color(255, 0, 0));
 
 	sf::VertexBuffer vb(sf::Triangles);
 	if (! vb.create(verts.size()))
@@ -423,19 +447,11 @@ int main(int argc, char **argv)
 	if (! vb.update(verts.data()))
 		XASRT(0);
 
-	sf::Vertex tb[3];
-	tb[0].position = sf::Vector2f(0, 0);
-	tb[1].position = sf::Vector2f(50, 0);
-	tb[2].position = sf::Vector2f(50, 50);
-	sf::Vertex tvs[6];
-	tvs[0].position = sf::Vector2f(400, 400);
-	tvs[1].position = sf::Vector2f(500, 350);
-	tvs[2].position = sf::Vector2f(450, 450);
-	tvs[3].position = tb[0].position;
-	tvs[4].position = tb[1].position;
-	tvs[5].position = tb[2].position;
-	for (size_t i = 0; i < 6; i++)
-		tvs[i].color = sf::Color(0, 0, 255);
+	Tri tb;
+	tb.d[0] = sf::Vector2f(0, 0);
+	tb.d[1] = sf::Vector2f(50, 0);
+	tb.d[2] = sf::Vector2f(50, 50);
+	sf::Vector2f tbpos;
 
 	while (window.isOpen()) {
 		sf::Event event;
@@ -449,31 +465,40 @@ int main(int argc, char **argv)
 					window.close();
 				break;
 			case sf::Event::MouseMoved:
-				sf::Vector2f mcenter((float)event.mouseMove.x, (float)event.mouseMove.y);
-				tvs[3].position = tb[0].position + mcenter;
-				tvs[4].position = tb[1].position + mcenter;
-				tvs[5].position = tb[2].position + mcenter;
+				tbpos = sf::Vector2f((float)event.mouseMove.x, (float)event.mouseMove.y);
 				break;
 			}
 		}
 		window.clear(sf::Color(128, 128, 128));
 
-		window.draw(shape, sf::RenderStates(sf::Transform().translate(16, 16)));
 		window.draw(vb);
 
-		Tri q0;
-		q0.d[0] = tvs[0].position;
-		q0.d[1] = tvs[1].position;
-		q0.d[2] = tvs[2].position;
-		Tri q1;
-		q1.d[0] = tvs[3].position;
-		q1.d[1] = tvs[4].position;
-		q1.d[2] = tvs[5].position;
-		bool isect = triangles_intersect_4(q0, q1);
-		for (size_t i = 0; i < 6; i++)
-			tvs[i].color = sf::Color(0, 0, 255 * (((!!isect)/2.0f)+0.5f));
+		Tri q0 = tb.translatedBy(tbpos);
+		
+		std::vector<sf::Vertex> colverts;
+		for (size_t i = 0; i < doc_tris.size(); i++) {
+			std::set<EntCol *> cols1;
+			qt->check(q0.colRect(), &cols1);
+			for (auto it = cols1.begin(); it != cols1.end(); ++it) {
+				const Tri &q1 = *(*it)->colTri(0);
+				bool isect = triangles_intersect_4(q0, q1);
+				if (isect)
+					for (size_t j = 0; j < 3; j++)
+						colverts.push_back(sf::Vertex(q1.d[j], sf::Color(255, 255, 0)));
+			}
+			//bool is2 = triangles_intersect_4(q0, doc_tris[i]);
+			//if (is2)
+			//	for (size_t j = 0; j < 3; j++)
+			//		colverts.push_back(sf::Vertex(doc_tris[i].d[j], sf::Color(255, 255, 0)));
+		}
 
-		window.draw(tvs, 6, sf::Triangles);
+		window.draw(colverts.data(), colverts.size(), sf::Triangles);
+
+		std::vector<sf::Vertex> tvs;
+		for (size_t i = 0; i < 3; i++)
+			tvs.push_back(sf::Vertex(tb.d[i] + tbpos, sf::Color(0, 0, 255)));
+
+		window.draw(tvs.data(), tvs.size(), sf::Triangles);
 
 		window.display();
 	}

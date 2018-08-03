@@ -1,12 +1,10 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.12)
+cmake_policy(SET CMP0074 NEW) # PackageName_ROOT variables
 project(sf)
 
+# Eigen3_ROOT SFML_ROOT assist find_package searches
+
 set(EXECUTABLE_OUTPUT_PATH "${CMAKE_SOURCE_DIR}/bin")
-
-set(SF_MODULE_PATH_SFML -NOTFOUND CACHE STRING "path")
-set(SF_MODULE_PATH_EIGEN -NOTFOUND CACHE STRING "path")
-
-list(APPEND CMAKE_MODULE_PATH ${SF_MODULE_PATH_SFML} ${SF_MODULE_PATH_EIGEN})
 
 find_package(Eigen3 CONFIG COMPONENTS Eigen3::Eigen REQUIRED)
 find_package(SFML CONFIG COMPONENTS audio network graphics system window REQUIRED)
@@ -19,7 +17,7 @@ add_executable(sf
 	src/main.cpp
 )
 target_include_directories(sf PUBLIC ${CMAKE_SOURCE_DIR}/src)
-target_include_directories(sf PUBLIC ${SF_MODULE_PATH_EIGEN}/../../../include/eigen3)
+target_include_directories(sf PUBLIC ${Eigen3_ROOT}/../../../include/eigen3)
 target_link_libraries(sf sfml-graphics sfml-system sfml-window)
 if (WIN32)
 	target_link_libraries(sf shlwapi)

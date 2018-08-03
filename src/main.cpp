@@ -202,24 +202,6 @@ public:
 		return inc_bound;
 	}
 
-	void _rectRootNodeUniq(const sf::Vector2f *r4, const Rectf &r, size_t uniq_num, size_t *o_uniq, size_t *o_vert)
-	{
-		XASRT(uniq_num == 4);
-		const float h = m_bound / 2;
-		Rectf rnode4[4] = {
-			{ 0, 0, h, h }, { h, 0, h, h },
-			{ 0, h, h, h }, { h, h, h, h },
-		};
-		size_t idx = 0;
-		for (size_t i = 0; i < 4; i++)
-			for (size_t j = 0; j < 4; j++)
-				if (rnode4[i].contains(r4[j])) {
-					o_uniq[idx] = i;
-					o_vert[idx++] = j;
-					break;
-				}
-	}
-
 	void remove(const sp<EntCol> &ent)
 	{
 		auto it = m_ents.find(ent);
@@ -249,18 +231,17 @@ public:
 	{
 		std::set<EntCol *> cols;
 		const float inc_bound = _computeIncBound(r);
-		const sf::Vector2f r4[4] = {
-			{ r.left, r.top }, { r.left + r.width, r.top },
-			{ r.left, r.top + r.height }, { r.left + r.width, r.top + r.height },
+		// nodes may have duplicates
+		// FIXME: modify _descentToHarvestNocreate to take all four r corners at once
+		//   and ensure no time is wasted harvesting same nodes twice
+		QuadNode *nodes[4] = {
+			_descendToHarvestNocreate(inc_bound, r.left, r.top, &cols), _descendToHarvestNocreate(inc_bound, r.left + r.width, r.top, &cols),
+			_descendToHarvestNocreate(inc_bound, r.left, r.top + r.height, &cols), _descendToHarvestNocreate(inc_bound, r.left + r.width, r.top + r.height, &cols),
 		};
-		size_t uniq_node[4] = { -1, -1, -1, -1 };
-		size_t uniq_vert[4] = { -1, -1, -1, -1 };
-		_rectRootNodeUniq(r4, r, 4, uniq_node, uniq_vert);
+		// FIXME: before calling _floodHarvestNocreate see to duplicates being filtered out
+		//   ensuring no time is wasted harvesting same nodes twice
 		for (size_t i = 0; i < 4; i++)
-			if (uniq_node[i] != (size_t)-1) {
-				QuadNode *n = _descendToHarvestNocreate(inc_bound, r4[uniq_vert[i]].x, r4[uniq_vert[i]].y, &cols);
-				_floodHarvestNocreate(n, &cols);
-			}
+			_floodHarvestNocreate(nodes[i], &cols);
 		*o_cols = std::move(cols);
 	}
 };

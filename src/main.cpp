@@ -202,7 +202,7 @@ public:
 		return inc_bound;
 	}
 
-	void _rectRootNodeUniq(const sf::Vector2f *r4, const Rectf &r, size_t uniq_num, size_t *o_uniq)
+	void _rectRootNodeUniq(const sf::Vector2f *r4, const Rectf &r, size_t uniq_num, size_t *o_uniq, size_t *o_vert)
 	{
 		XASRT(uniq_num == 4);
 		const float h = m_bound / 2;
@@ -214,7 +214,8 @@ public:
 		for (size_t i = 0; i < 4; i++)
 			for (size_t j = 0; j < 4; j++)
 				if (rnode4[i].contains(r4[j])) {
-					o_uniq[idx++] = i;
+					o_uniq[idx] = i;
+					o_vert[idx++] = j;
 					break;
 				}
 	}
@@ -252,11 +253,12 @@ public:
 			{ r.left, r.top }, { r.left + r.width, r.top },
 			{ r.left, r.top + r.height }, { r.left + r.width, r.top + r.height },
 		};
-		size_t uniq[4] = { -1, -1, -1, -1 };
-		_rectRootNodeUniq(r4, r, 4, uniq);
+		size_t uniq_node[4] = { -1, -1, -1, -1 };
+		size_t uniq_vert[4] = { -1, -1, -1, -1 };
+		_rectRootNodeUniq(r4, r, 4, uniq_node, uniq_vert);
 		for (size_t i = 0; i < 4; i++)
-			if (uniq[i] != (size_t)-1) {
-				QuadNode *n = _descendToHarvestNocreate(inc_bound, r4[uniq[i]].x, r4[uniq[i]].y, &cols);
+			if (uniq_node[i] != (size_t)-1) {
+				QuadNode *n = _descendToHarvestNocreate(inc_bound, r4[uniq_vert[i]].x, r4[uniq_vert[i]].y, &cols);
 				_floodHarvestNocreate(n, &cols);
 			}
 		*o_cols = std::move(cols);

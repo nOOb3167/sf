@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Dense>
@@ -179,8 +180,8 @@ public:
 		XASRT(uniq_num == 4);
 		const float h = m_bound / 2;
 		Rectf rnode4[4] = {
-			{ 0, 0, h, h },{ h, 0, h, h },
-			{ 0, h, h, h },{ h, h, h, h },
+			{ 0, 0, h, h }, { h, 0, h, h },
+			{ 0, h, h, h }, { h, h, h, h },
 		};
 		size_t idx = 0;
 		for (size_t i = 0; i < 4; i++)
@@ -216,7 +217,7 @@ public:
 			nodes[i]->m_entry[ent] = 0;
 	}
 
-	void check(const Rectf &r)
+	void check(const Rectf &r, std::set<EntCol *> *o_cols)
 	{
 		std::set<EntCol *> cols;
 		const float inc_bound = _computeIncBound(r);
@@ -231,6 +232,7 @@ public:
 				QuadNode *n = _descendToHarvestNocreate(inc_bound, r4[uniq[i]].x, r4[uniq[i]].y, &cols);
 				_floodHarvestNocreate(n, &cols);
 			}
+		*o_cols = std::move(cols);
 	}
 };
 
@@ -404,6 +406,9 @@ int main(int argc, char **argv)
 	sp<QuadTree> qt(new QuadTree(256));
 	sp<E1> e1(new E1());
 	qt->insert(e1, Rectf(0, 0, 200, 200));
+	std::set<EntCol *> cols1;
+	//qt->check(Rectf(0, 0, 200, 200), &cols1);
+	qt->check(Rectf(0, 200, 5, 5), &cols1);
 
 	sf::RenderWindow window(sf::VideoMode(800, 600), "SF");
 

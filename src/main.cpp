@@ -123,11 +123,13 @@ class QuadTree
 {
 public:
 	float m_bound;
+	float m_min_bound;
 	sp<QuadNode> m_root;
 	std::map<sp<EntCol>, QuadNode4> m_ents;
 
-	QuadTree(float bound) :
+	QuadTree(float bound, float min_bound) :
 		m_bound(bound),
+		m_min_bound(min_bound),
 		m_root(new QuadNode())
 	{}
 
@@ -199,7 +201,8 @@ public:
 		const float maxside = GS_MAX(r.width, r.height);
 		const float rank_ = ceil(log2f(maxside));
 		const float inc_bound = exp2f(rank_);
-		return inc_bound;
+		const float inc_bound_ = GS_MAX(inc_bound, m_min_bound);
+		return inc_bound_;
 	}
 
 	void remove(const sp<EntCol> &ent)
@@ -413,7 +416,7 @@ int main(int argc, char **argv)
 
 	std::vector<sf::Vertex> verts = verts_from_tris(doc_tris);
 
-	sp<QuadTree> qt(new QuadTree(1024));
+	sp<QuadTree> qt(new QuadTree(1024, 16));
 	
 	for (size_t i = 0; i < doc_tris.size(); i++) {
 		sp<E1> e1(new E1(doc_tris[i].d[0], doc_tris[i].d[1], doc_tris[i].d[2]));

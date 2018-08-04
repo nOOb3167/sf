@@ -53,6 +53,47 @@ public:
 	{}
 };
 
+class Img
+{
+public:
+	Img(const char *fname, Rectf dim) :
+		m_img(new sf::Image()),
+		m_tex(new sf::Texture()),
+		m_spr(),
+		m_dim(dim)
+	{
+		if (! m_img->loadFromFile(fname))
+			XASRT(0);
+		if (! m_tex->loadFromImage(*m_img))
+			XASRT(0);
+		m_spr = sp<sf::Sprite>(new sf::Sprite(*m_tex));
+		// SFML does something like
+		//   0: start with identity transform
+		//   1: transform scale around origin
+		//   2: transform rotate around origin
+		//   3: rawset translation
+		//   4: rawset decrease translation by SCALED ORIGIN
+		// this блять pants on head can be neutralized by
+		// increasing translation to compensate.
+		// we will increase by halfdim aka halfsize * scale.
+		// since halfsize is origin, halfsize * scale is SCALED ORIGIN.
+		const sf::Vector2u size(m_img->getSize());
+		const sf::Vector2f halfsize(size.x / 2.0f, size.y / 2.0f);
+		const sf::Vector2f halfdim(dim.width / 2.0f, dim.height / 2.0f);
+		const sf::Vector2f scale(dim.width / size.x, dim.height / size.y);
+		XASRT(fabsf(halfdim.x - halfsize.x * scale.x) < 0.001f && fabsf(halfdim.y - halfsize.y * scale.y) < 0.001f);
+		m_spr->setOrigin(halfsize);
+		m_spr->setScale(scale);
+		m_spr->setPosition(sf::Vector2f(dim.left, dim.top) + halfdim);
+	}
+
+public:
+	sp<sf::Image> m_img;
+	sp<sf::Texture> m_tex;
+	sp<sf::Sprite> m_spr;
+	Rectf m_dim;
+};
+
 class Tri
 {
 public:
@@ -281,6 +322,14 @@ std::string resource_path_find()
 		throw FilesysExc("resource path not found");
 }
 
+XMLElement * xml_elt_attr_val_find(const std::vector<XMLElement *> &v, const char *a, const char *x)
+{
+	for (size_t i = 0; i < v.size(); i++)
+		if (v[i]->Attribute(a) && std::string(x).compare(v[i]->Attribute(a)) == 0)
+			return v[i];
+	return nullptr;
+}
+
 std::vector<XMLElement *> xml_child_sibling_find_all(XMLElement *e, const char *n)
 {
 	std::vector<XMLElement *> v;
@@ -346,6 +395,23 @@ std::vector<Tri> xml_ds_to_tris(const std::vector<std::string> &ds)
 	return v;
 }
 
+sp<Img> xml_image_to_img(const XMLElement *im, const char *data_path)
+{
+	const char *href = im->Attribute("xlink:href");
+	XASRT(href);
+	std::string fname = ns_filesys::path_append_abs_rel(data_path, href);
+	Rectf dim(im->FloatAttribute("x"), im->FloatAttribute("y"), im->FloatAttribute("width"), im->FloatAttribute("height"));
+	return sp<Img>(new Img(fname.c_str(), dim));
+}
+
+std::vector<sp<Img> > xml_images_to_imgs(const std::vector<XMLElement *> ims, const char *data_path)
+{
+	std::vector<sp<Img> > v;
+	for (size_t i = 0; i < ims.size(); i++)
+		v.push_back(xml_image_to_img(ims[i], data_path));
+	return v;
+}
+
 std::vector<sf::Vertex> verts_from_tris(const std::vector<Tri> &t)
 {
 	std::vector<sf::Vertex> v(t.size() * 3);
@@ -403,16 +469,25 @@ bool triangles_intersect_4(const Tri &t0, const Tri &t1) {
 int main(int argc, char **argv)
 {
 	std::string resource_path = resource_path_find();
+	std::string data_path = ns_filesys::path_append_abs_rel(resource_path, "data");
 
 	XMLDocument doc;
 
-	doc.LoadFile(ns_filesys::path_append_abs_rel(resource_path, "data/test0.svg").c_str());
+	doc.LoadFile(ns_filesys::path_append_abs_rel(data_path, "test0.svg").c_str());
 	XMLElement *doc_root = doc.RootElement();
 	XASRT(doc_root);
 	std::vector<XMLElement *> doc_g = xml_child_sibling_find_all(doc_root, "g");
-	std::vector<XMLElement *> doc_g_path = xml_child_sibling_find_all(doc_g.at(0), "path");
-	std::vector<std::string>  doc_d = xml_paths_to_ds(doc_g_path);
-	std::vector<Tri>          doc_tris = xml_ds_to_tris(doc_d);
+	XMLElement *doc_g_collision_static = xml_elt_attr_val_find(doc_g, "id", "collision_static");
+	XASRT(doc_g_collision_static);
+	std::vector<XMLElement *> doc_g_collision_static_path = xml_child_sibling_find_all(doc_g_collision_static, "path");
+	std::vector<std::string>  doc_g_collision_static_path_d = xml_paths_to_ds(doc_g_collision_static_path);
+	std::vector<Tri>          doc_tris = xml_ds_to_tris(doc_g_collision_static_path_d);
+
+	XMLElement *doc_g_background = xml_elt_attr_val_find(doc_g, "id", "background");
+	XASRT(doc_g_background);
+	std::vector<XMLElement *> doc_g_background_image = xml_child_sibling_find_all(doc_g_background, "image");
+
+	std::vector<sp<Img> > imgs = xml_images_to_imgs(doc_g_background_image, data_path.c_str());
 
 	std::vector<sf::Vertex> verts = verts_from_tris(doc_tris);
 
@@ -456,6 +531,9 @@ int main(int argc, char **argv)
 			}
 		}
 		window.clear(sf::Color(128, 128, 128));
+
+		for (size_t i = 0; i < imgs.size(); i++)
+			window.draw(*imgs[i]->m_spr);
 
 		window.draw(vb);
 

@@ -79,12 +79,23 @@ public:
 		// since halfsize is origin, halfsize * scale is SCALED ORIGIN.
 		const sf::Vector2u size(m_img->getSize());
 		const sf::Vector2f halfsize(size.x / 2.0f, size.y / 2.0f);
-		const sf::Vector2f halfdim(dim.width / 2.0f, dim.height / 2.0f);
-		const sf::Vector2f scale(dim.width / size.x, dim.height / size.y);
+		const sf::Vector2f halfdim(m_dim.width / 2.0f, m_dim.height / 2.0f);
+		const sf::Vector2f scale(m_dim.width / size.x, m_dim.height / size.y);
 		XASRT(fabsf(halfdim.x - halfsize.x * scale.x) < 0.001f && fabsf(halfdim.y - halfsize.y * scale.y) < 0.001f);
 		m_spr->setOrigin(halfsize);
 		m_spr->setScale(scale);
-		m_spr->setPosition(sf::Vector2f(dim.left, dim.top) + halfdim);
+		m_spr->setPosition(sf::Vector2f(m_dim.left, m_dim.top) + halfdim);
+	}
+
+	void setPosition(float x, float y)
+	{
+		const sf::Vector2f halfdim(m_dim.width / 2.0f, m_dim.height / 2.0f);
+		m_spr->setPosition(sf::Vector2f(x, y) + halfdim);
+	}
+
+	Rectf & getDim()
+	{
+		return m_dim;
 	}
 
 public:
@@ -143,6 +154,29 @@ public:
 
 public:
 	Tri m_t;
+};
+
+class E2 : public EntCol
+{
+public:
+	E2(const Rectf &m_dim) :
+		m_t()
+	{
+		m_t[0].d[0] = { m_dim.left, m_dim.top};
+		m_t[0].d[1] = { m_dim.left + m_dim.width, m_dim.top };
+		m_t[0].d[2] = { m_dim.left + m_dim.width, m_dim.top + m_dim.height };
+		m_t[1].d[0] = { m_dim.left, m_dim.top };
+		m_t[1].d[1] = { m_dim.left, m_dim.top + m_dim.height };
+		m_t[1].d[2] = { m_dim.left + m_dim.width, m_dim.top + m_dim.height };
+	}
+
+	virtual Tri* colTri(size_t a) override
+	{
+		return a < 2 ? &m_t[a] : nullptr;
+	}
+
+public:
+	Tri m_t[2];
 };
 
 class QuadNode

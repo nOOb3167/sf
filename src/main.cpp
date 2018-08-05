@@ -23,7 +23,8 @@
 #include <selfup/ns_filesys.h>
 #include <selfup/ns_helpers.h>
 
-#define DF_ENTCOL_MAX_TRIS 128
+#define DF_ENTCOL_MAX_TRIS 20
+#define DF_ENTCOL_MAX_MOVE 20.0f
 #define XASRT(b) do { if (! (b)) throw ErrExc(); } while (0)
 
 // https://www.sfml-dev.org/tutorials/2.5/graphics-draw.php#drawing-from-threads
@@ -51,6 +52,10 @@ using sp = ::std::shared_ptr<T>;
 const auto rel = ::ns_filesys::path_append_abs_rel;
 
 typedef sf::Rect<float> Rectf;
+
+class Tri;
+
+bool triangles_intersect_4(const Tri &t0, const Tri &t1);
 
 class ErrExc : std::runtime_error
 {
@@ -165,9 +170,9 @@ public:
 class EntCol
 {
 public:
-	virtual Tri* colTri(size_t a) = 0;
+	virtual const Tri* colTri(size_t a) const = 0;
 
-	Rectf colRect()
+	Rectf colRect() const
 	{
 		float mx = std::numeric_limits<float>::infinity();
 		float Mx = -std::numeric_limits<float>::infinity();
@@ -199,7 +204,7 @@ public:
 		m_t.d[2] = c;
 	}
 
-	virtual Tri* colTri(size_t a) override
+	virtual const Tri* colTri(size_t a) const override
 	{
 		return a == 0 ? &m_t : nullptr;
 	}
@@ -215,7 +220,7 @@ public:
 		m_img(new Img(rel(data_path, "e2_0.png").c_str(), dim))
 	{}
 
-	virtual Tri* colTri(size_t a) override
+	virtual const Tri* colTri(size_t a) const override
 	{
 		return a < 2 ? &m_img->m_dim_tris[a] : nullptr;
 	}
@@ -247,10 +252,15 @@ public:
 	sp<QuadNode> m_root;
 	std::map<sp<EntCol>, QuadNode4> m_ents;
 
+	sf::Transform m_cw;
+	sf::Transform m_ccw;
+
 	QuadTree(float bound, float min_bound) :
 		m_bound(bound),
 		m_min_bound(min_bound),
-		m_root(new QuadNode())
+		m_root(new QuadNode()),
+		m_cw(sf::Transform().rotate(15)),
+		m_ccw(sf::Transform().rotate(-15))
 	{}
 
 	template <typename InputIter>
@@ -381,6 +391,60 @@ public:
 		//   ensuring no time is wasted harvesting same nodes twice
 		for (size_t i = 0; i < 4; i++)
 			_floodHarvestNocreate(nodes[i], o_cols);
+	}
+
+	bool checkFreeSpot(const EntCol &ec, const Rectf &r_ec, const std::set<EntCol *> &cols) const
+	{
+		for (auto it = cols.begin(); it != cols.end(); ++it) {
+			const Rectf &rr = (*it)->colRect();
+			// rect-level collision
+			if (! r_ec.intersects(rr))
+				continue;
+			// tris-level collision
+			const Tri *t = nullptr;
+			const Tri *tt = nullptr;
+			for (size_t i = 0; (t = ec.colTri(i)); i++)
+				for (size_t ii = 0; (tt = (*it)->colTri(ii)); ii++) {
+					XASRT(i < DF_ENTCOL_MAX_TRIS && ii < DF_ENTCOL_MAX_TRIS);
+					bool isect = triangles_intersect_4(*t, *tt);
+					if (isect)
+						return false;
+			}
+		}
+		return true;
+	}
+
+	sf::Vector2f checkSimulate(const EntCol &ec, const sf::Vector2f &move, const sf::Vector2f &extramove) const
+	{
+		const Rectf &r_ec = ec.colRect();
+		// movements max_move limited per-axis not by vector magnitude
+		const sf::Vector2f cur(r_ec.left, r_ec.top);
+		const sf::Vector2f &mv = move + extramove;
+		const sf::Vector2f &twicemv = mv * 2.0f;
+		const sf::Vector2f &nxt = cur + mv;
+		XASRT(fabsf(mv.x) < DF_ENTCOL_MAX_MOVE && fabsf(mv.y) < DF_ENTCOL_MAX_MOVE);
+		const Rectf r_nxt(nxt.x, nxt.y, r_ec.width, r_ec.height);
+		const Rectf r_nxt_expanded(nxt.x - mv.x, nxt.y - mv.y, r_ec.width + twicemv.x, r_ec.height + twicemv.y);
+		std::set<EntCol *> cols;
+		// FIXME: possibly check vs r_nxt and go for r_nxt_expanded only on a hit
+		check(r_nxt_expanded, &cols);
+		if (cols.empty())
+			return nxt;
+		// FIXME: do actual collision check
+		sf::Vector2f cw = nxt;
+		sf::Vector2f ccw = nxt;
+		for (size_t i = 0; i < 5; i++) {
+			cw = m_cw.transformPoint(cw);
+			ccw = m_ccw.transformPoint(cw);
+			const Rectf r_cw(cw.x, cw.y, r_ec.width, r_ec.height);
+			if (checkFreeSpot(ec, r_cw, cols))
+				return cw;
+			const Rectf r_ccw(ccw.x, ccw.y, r_ec.width, r_ec.height);
+			if (checkFreeSpot(ec, r_ccw, cols))
+				return ccw;
+		}
+		// no free spot - stay still
+		return sf::Vector2f(r_ec.top, r_ec.left);
 	}
 };
 
@@ -553,7 +617,8 @@ float cross2(const Tri &points, const Tri &triangle)
 		(sa+ta >= D && sb+tb >= D && sc+tc >= D));
 }
 
-bool triangles_intersect_4(const Tri &t0, const Tri &t1) {
+bool triangles_intersect_4(const Tri &t0, const Tri &t1)
+{
 	// https://stackoverflow.com/questions/2778240/detection-of-triangle-collision-in-2d-space/44269990#44269990
 	return !(cross2(t0,t1) ||
 		cross2(t1,t0));
@@ -596,6 +661,7 @@ int main(int argc, char **argv)
 	sf::RenderWindow window(sf::VideoMode(800, 600), "SF");
 
 	window.setMouseCursorGrabbed(true);
+	window.setFramerateLimit(60);
 
 	sf::VertexBuffer vb(sf::Triangles);
 	if (! vb.create(verts.size()))

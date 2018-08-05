@@ -48,6 +48,8 @@ using namespace tinyxml2;
 template<typename T>
 using sp = ::std::shared_ptr<T>;
 
+const auto rel = ::ns_filesys::path_append_abs_rel;
+
 typedef sf::Rect<float> Rectf;
 
 class ErrExc : std::runtime_error
@@ -56,6 +58,44 @@ public:
 	ErrExc() :
 		std::runtime_error("")
 	{}
+};
+
+class Tri
+{
+public:
+	Tri translatedBy(const sf::Vector2f &a)
+	{
+		Tri t;
+		for (size_t i = 0; i < 3; i++)
+			t.d[i] = d[i] + a;
+		return t;
+	}
+
+	Rectf colRect()
+	{
+		const float mx = GS_MIN(d[0].x, GS_MIN(d[1].x, d[2].x));
+		const float Mx = GS_MAX(d[0].x, GS_MAX(d[1].x, d[2].x));
+		const float my = GS_MIN(d[0].y, GS_MIN(d[1].y, d[2].y));
+		const float My = GS_MAX(d[0].y, GS_MAX(d[1].y, d[2].y));
+		Rectf r(mx, my, Mx - mx, My - my);
+		return r;
+	}
+
+	static std::pair<Tri, Tri> fromRect(const Rectf &dim)
+	{
+		std::pair<Tri, Tri> t2;
+		Tri &t0 = t2.first, &t1 = t2.second;
+		t0.d[0] = { dim.left, dim.top };
+		t0.d[1] = { dim.left + dim.width, dim.top };
+		t0.d[2] = { dim.left + dim.width, dim.top + dim.height };
+		t1.d[0] = { dim.left, dim.top };
+		t1.d[1] = { dim.left, dim.top + dim.height };
+		t1.d[2] = { dim.left + dim.width, dim.top + dim.height };
+		return t2;
+	}
+
+public:
+	sf::Vector2f d[3] = {};
 };
 
 class Img
@@ -90,12 +130,23 @@ public:
 		m_spr->setOrigin(halfsize);
 		m_spr->setScale(scale);
 		m_spr->setPosition(sf::Vector2f(m_dim.left, m_dim.top) + halfdim);
+		_refreshDimTris();
+	}
+
+	void _refreshDimTris()
+	{
+		auto t2 = Tri::fromRect(m_dim);
+		m_dim_tris[0] = t2.first;
+		m_dim_tris[1] = t2.second;
 	}
 
 	void setPosition(float x, float y)
 	{
 		const sf::Vector2f halfdim(m_dim.width / 2.0f, m_dim.height / 2.0f);
 		m_spr->setPosition(sf::Vector2f(x, y) + halfdim);
+		m_dim.left = x;
+		m_dim.top = y;
+		_refreshDimTris();
 	}
 
 	Rectf & getDim()
@@ -108,31 +159,7 @@ public:
 	sp<sf::Texture> m_tex;
 	sp<sf::Sprite> m_spr;
 	Rectf m_dim;
-};
-
-class Tri
-{
-public:
-	Tri translatedBy(const sf::Vector2f &a)
-	{
-		Tri t;
-		for (size_t i = 0; i < 3; i++)
-			t.d[i] = d[i] + a;
-		return t;
-	}
-
-	Rectf colRect()
-	{
-		const float mx = GS_MIN(d[0].x, GS_MIN(d[1].x, d[2].x));
-		const float Mx = GS_MAX(d[0].x, GS_MAX(d[1].x, d[2].x));
-		const float my = GS_MIN(d[0].y, GS_MIN(d[1].y, d[2].y));
-		const float My = GS_MAX(d[0].y, GS_MAX(d[1].y, d[2].y));
-		Rectf r(mx, my, Mx - mx, My - my);
-		return r;
-	}
-
-public:
-	sf::Vector2f d[3] = {};
+	Tri m_dim_tris[2];
 };
 
 class EntCol
@@ -159,6 +186,8 @@ public:
 	}
 };
 
+typedef ::std::map<sp<EntCol>, size_t> ent_map_t;
+
 class E1 : public EntCol
 {
 public:
@@ -182,24 +211,17 @@ public:
 class E2 : public EntCol
 {
 public:
-	E2(const Rectf &m_dim) :
-		m_t()
-	{
-		m_t[0].d[0] = { m_dim.left, m_dim.top};
-		m_t[0].d[1] = { m_dim.left + m_dim.width, m_dim.top };
-		m_t[0].d[2] = { m_dim.left + m_dim.width, m_dim.top + m_dim.height };
-		m_t[1].d[0] = { m_dim.left, m_dim.top };
-		m_t[1].d[1] = { m_dim.left, m_dim.top + m_dim.height };
-		m_t[1].d[2] = { m_dim.left + m_dim.width, m_dim.top + m_dim.height };
-	}
+	E2(const std::string &data_path, const Rectf &dim) :
+		m_img(new Img(rel(data_path, "e2_0.png").c_str(), dim))
+	{}
 
 	virtual Tri* colTri(size_t a) override
 	{
-		return a < 2 ? &m_t[a] : nullptr;
+		return a < 2 ? &m_img->m_dim_tris[a] : nullptr;
 	}
 
 public:
-	Tri m_t[2];
+	sp<Img> m_img;
 };
 
 class QuadNode
@@ -231,11 +253,12 @@ public:
 		m_root(new QuadNode())
 	{}
 
-	static QuadTree * createFromEntCol(float bound, float min_bound, const std::vector<sp<EntCol> > &es)
+	template <typename InputIter>
+	static QuadTree * createFromEntCol(float bound, float min_bound, InputIter &esb, InputIter &ese)
 	{
 		QuadTree * qt = new QuadTree(bound, min_bound);
-		for (size_t i = 0; i < es.size(); i++)
-			qt->insert(es[i], es[i]->colRect());
+		for (/*dummy*/; esb != ese; ++esb)
+			qt->insert(esb->first, esb->first->colRect());
 		return qt;
 	}
 
@@ -380,9 +403,9 @@ std::string resource_path_find()
 	const std::string &up0dir = killslash(curdir);
 	const std::string &up1dir = killslash(ns_filesys::path_directory(up0dir));
 	const std::string &up2dir = killslash(ns_filesys::path_directory(up1dir));
-	std::fstream fs0(ns_filesys::path_append_abs_rel(up0dir, name), std::ios_base::in | std::ios_base::binary);
-	std::fstream fs1(ns_filesys::path_append_abs_rel(up1dir, name), std::ios_base::in | std::ios_base::binary);
-	std::fstream fs2(ns_filesys::path_append_abs_rel(up2dir, name), std::ios_base::in | std::ios_base::binary);
+	std::fstream fs0(rel(up0dir, name), std::ios_base::in | std::ios_base::binary);
+	std::fstream fs1(rel(up1dir, name), std::ios_base::in | std::ios_base::binary);
+	std::fstream fs2(rel(up2dir, name), std::ios_base::in | std::ios_base::binary);
 	if (fs0.good())
 		return up0dir;
 	else if (fs1.good())
@@ -470,9 +493,8 @@ sp<Img> xml_image_to_img(const XMLElement *im, const char *data_path)
 {
 	const char *href = im->Attribute("xlink:href");
 	XASRT(href);
-	std::string fname = ns_filesys::path_append_abs_rel(data_path, href);
 	Rectf dim(im->FloatAttribute("x"), im->FloatAttribute("y"), im->FloatAttribute("width"), im->FloatAttribute("height"));
-	return sp<Img>(new Img(fname.c_str(), dim));
+	return sp<Img>(new Img(rel(data_path, href).c_str(), dim));
 }
 
 std::vector<sp<Img> > xml_images_to_imgs(const std::vector<XMLElement *> ims, const char *data_path)
@@ -540,11 +562,11 @@ bool triangles_intersect_4(const Tri &t0, const Tri &t1) {
 int main(int argc, char **argv)
 {
 	std::string resource_path = resource_path_find();
-	std::string data_path = ns_filesys::path_append_abs_rel(resource_path, "data");
+	std::string data_path = rel(resource_path, "data");
 
 	XMLDocument doc;
 
-	doc.LoadFile(ns_filesys::path_append_abs_rel(data_path, "test0.svg").c_str());
+	doc.LoadFile(rel(data_path, "test0.svg").c_str());
 	XMLElement *doc_root = doc.RootElement();
 	XASRT(doc_root);
 	std::vector<XMLElement *> doc_g = xml_child_sibling_find_all(doc_root, "g");
@@ -562,13 +584,15 @@ int main(int argc, char **argv)
 
 	std::vector<sf::Vertex> verts = verts_from_tris(doc_tris);
 
-	std::vector<sp<EntCol> > es;
+	ent_map_t es;
 
 	for (size_t i = 0; i < doc_tris.size(); i++)
-		es.push_back(sp<EntCol>(new E1(doc_tris[i].d[0], doc_tris[i].d[1], doc_tris[i].d[2])));
+		es[sp<EntCol>(new E1(doc_tris[i].d[0], doc_tris[i].d[1], doc_tris[i].d[2]))] = 0;
 
-	sp<const QuadTree> qt_static(QuadTree::createFromEntCol(1024, 16, es));
+	sp<const QuadTree> qt_static(QuadTree::createFromEntCol(1024, 16, es.begin(), es.end()));
 	
+	sp<E2> e2(new E2(data_path, Rectf(0, 0, 50, 50)));
+
 	sf::RenderWindow window(sf::VideoMode(800, 600), "SF");
 
 	window.setMouseCursorGrabbed(true);

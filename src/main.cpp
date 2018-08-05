@@ -607,7 +607,6 @@ int main(int argc, char **argv)
 	tb.d[0] = sf::Vector2f(0, 0);
 	tb.d[1] = sf::Vector2f(50, 0);
 	tb.d[2] = sf::Vector2f(50, 50);
-	sf::Vector2f tbpos;
 
 	while (window.isOpen()) {
 		sf::Event event;
@@ -621,7 +620,7 @@ int main(int argc, char **argv)
 					window.close();
 				break;
 			case sf::Event::MouseMoved:
-				tbpos = sf::Vector2f((float)event.mouseMove.x, (float)event.mouseMove.y);
+				e2->m_img->setPosition((float)event.mouseMove.x, (float)event.mouseMove.y);
 				break;
 			}
 		}
@@ -632,15 +631,13 @@ int main(int argc, char **argv)
 
 		window.draw(vb);
 
-		Tri q0 = tb.translatedBy(tbpos);
-		
 		std::vector<sf::Vertex> colverts;
 		for (size_t i = 0; i < doc_tris.size(); i++) {
 			std::set<EntCol *> cols1;
-			qt_static->check(q0.colRect(), &cols1);
+			qt_static->check(e2->colRect(), &cols1);
 			for (auto it = cols1.begin(); it != cols1.end(); ++it) {
 				const Tri &q1 = *(*it)->colTri(0);
-				bool isect = triangles_intersect_4(q0, q1);
+				bool isect = triangles_intersect_4(*e2->colTri(0), q1);
 				if (isect)
 					for (size_t j = 0; j < 3; j++)
 						colverts.push_back(sf::Vertex(q1.d[j], sf::Color(255, 255, 0)));
@@ -653,11 +650,7 @@ int main(int argc, char **argv)
 
 		window.draw(colverts.data(), colverts.size(), sf::Triangles);
 
-		std::vector<sf::Vertex> tvs;
-		for (size_t i = 0; i < 3; i++)
-			tvs.push_back(sf::Vertex(tb.d[i] + tbpos, sf::Color(0, 0, 255)));
-
-		window.draw(tvs.data(), tvs.size(), sf::Triangles);
+		window.draw(*e2->m_img->m_spr);
 
 		window.display();
 	}

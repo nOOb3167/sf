@@ -6,6 +6,7 @@
 #include <chrono>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -22,6 +23,7 @@
 #include <selfup/ns_filesys.h>
 #include <selfup/ns_helpers.h>
 
+#define DF_ENTCOL_MAX_TRIS 128
 #define XASRT(b) do { if (! (b)) throw ErrExc(); } while (0)
 
 // https://www.sfml-dev.org/tutorials/2.5/graphics-draw.php#drawing-from-threads
@@ -37,6 +39,9 @@
 //   yay all vector libraries suck
 // https://gamedevelopment.tutsplus.com/tutorials/collision-detection-using-the-separating-axis-theorem--gamedev-169
 // (((!!isect)/2.0f)+0.5f)
+
+/* probably not required anyway just remove if it fails on any platform */
+static_assert(std::numeric_limits<float>::is_iec559, "IEEE 754 required");
 
 using namespace tinyxml2;
 
@@ -134,6 +139,24 @@ class EntCol
 {
 public:
 	virtual Tri* colTri(size_t a) = 0;
+
+	Rectf colRect()
+	{
+		float mx = std::numeric_limits<float>::infinity();
+		float Mx = -std::numeric_limits<float>::infinity();
+		float my = std::numeric_limits<float>::infinity();
+		float My = -std::numeric_limits<float>::infinity();
+		const Tri *f = nullptr;
+		for (size_t i = 0; (f = colTri(i)); i++) {
+			XASRT(i < DF_ENTCOL_MAX_TRIS);
+			mx = GS_MIN(mx, GS_MIN(f->d[0].x, GS_MIN(f->d[1].x, f->d[2].x)));
+			Mx = GS_MAX(Mx, GS_MAX(f->d[0].x, GS_MAX(f->d[1].x, f->d[2].x)));
+			my = GS_MIN(my, GS_MIN(f->d[0].y, GS_MIN(f->d[1].y, f->d[2].y)));
+			My = GS_MAX(My, GS_MAX(f->d[0].y, GS_MAX(f->d[1].y, f->d[2].y)));
+		}
+		Rectf r(mx, my, Mx - mx, My - my);
+		return r;
+	}
 };
 
 class E1 : public EntCol
@@ -191,7 +214,7 @@ public:
 class QuadNode4
 {
 public:
-	sp<QuadNode> m_d[4] = {};
+	QuadNode * m_d[4] = {};
 };
 
 class QuadTree
@@ -208,7 +231,15 @@ public:
 		m_root(new QuadNode())
 	{}
 
-	bool _boundContains(const Rectf &r)
+	static QuadTree * createFromEntCol(float bound, float min_bound, const std::vector<sp<EntCol> > &es)
+	{
+		QuadTree * qt = new QuadTree(bound, min_bound);
+		for (size_t i = 0; i < es.size(); i++)
+			qt->insert(es[i], es[i]->colRect());
+		return qt;
+	}
+
+	bool _boundContains(const Rectf &r) const
 	{
 		if (r.left >= 0 && r.left + r.width < m_bound &&
 			r.top >= 0 && r.top + r.height < m_bound)
@@ -216,7 +247,7 @@ public:
 		return false;
 	}
 
-	QuadNode * _descendToEx(float inc_bound, float inc_x, float inc_y, const std::function<void(QuadNode *)> &cbextra, const std::function<sp<QuadNode>()> &cbnull)
+	QuadNode * _descendTo(float inc_bound, float inc_x, float inc_y) const
 	{
 		float bas_bound = m_bound;
 		float bas_top = 0, bas_left = 0;
@@ -227,13 +258,10 @@ public:
 			const float midY = bas_top + bas_bound;
 			const float midX = bas_left + bas_bound;
 			const size_t nodeidx = (inc_y < midY ? 0 : 2) + (inc_x < midX ? 0 : 1);
-			if (cbextra)
-				cbextra(node);
-			if (cbnull && ! node->m_node[nodeidx])
-				node->m_node[nodeidx] = cbnull();
-			// FIXME: probably should be an XASRT(0) ?
+			//
 			if (! node->m_node[nodeidx])
-				return nullptr;
+				node->m_node[nodeidx] = std::make_shared<QuadNode>();
+			//
 			node = node->m_node[nodeidx].get();
 			bas_top += inc_y < midY ? 0 : bas_bound;
 			bas_left += inc_x < midX ? 0 : bas_bound;
@@ -241,26 +269,31 @@ public:
 		return node;
 	}
 
-	QuadNode * _descendTo(float inc_bound, float inc_x, float inc_y)
+	QuadNode * _descendToHarvestNocreate(float inc_bound, float inc_x, float inc_y, std::set<EntCol *> *cols) const
 	{
-		return _descendToEx(inc_bound, inc_x, inc_y,
-			nullptr,
-			[&]() {
-				return std::make_shared<QuadNode>();
-			});
+		float bas_bound = m_bound;
+		float bas_top = 0, bas_left = 0;
+		QuadNode *node = m_root.get();
+		XASRT(bas_bound >= inc_bound);
+		while (bas_bound != inc_bound) {
+			bas_bound /= 2;
+			const float midY = bas_top + bas_bound;
+			const float midX = bas_left + bas_bound;
+			const size_t nodeidx = (inc_y < midY ? 0 : 2) + (inc_x < midX ? 0 : 1);
+			//
+			for (auto it = node->m_entry.begin(); it != node->m_entry.end(); ++it)
+				cols->insert(it->first.get());
+			if (! node->m_node[nodeidx])
+				return nullptr;
+			//
+			node = node->m_node[nodeidx].get();
+			bas_top += inc_y < midY ? 0 : bas_bound;
+			bas_left += inc_x < midX ? 0 : bas_bound;
+		}
+		return node;
 	}
 
-	QuadNode * _descendToHarvestNocreate(float inc_bound, float inc_x, float inc_y, std::set<EntCol *> *cols)
-	{
-		return _descendToEx(inc_bound, inc_x, inc_y,
-			[&](QuadNode *node) {
-				for (auto it = node->m_entry.begin(); it != node->m_entry.end(); ++it)
-					cols->insert(it->first.get());
-			},
-			nullptr);
-	}
-
-	void _floodHarvestNocreate(QuadNode *node, std::set<EntCol *> *cols)
+	void _floodHarvestNocreate(QuadNode *node, std::set<EntCol *> *cols) const
 	{
 		if (! node)
 			return;
@@ -270,7 +303,7 @@ public:
 			_floodHarvestNocreate(node->m_node[i].get(), cols);
 	}
 
-	float _computeIncBound(const Rectf &r)
+	float _computeIncBound(const Rectf &r) const
 	{
 		XASRT(_boundContains(r));
 		const float maxside = GS_MAX(r.width, r.height);
@@ -303,24 +336,28 @@ public:
 		};
 		for (size_t i = 0; i < 4; i++)
 			nodes[i]->m_entry[ent] = 0;
+		XASRT(m_ents.find(ent) == m_ents.end());
+		m_ents[ent] = QuadNode4();
+		m_ents[ent].m_d[0] = nodes[0];
+		m_ents[ent].m_d[1] = nodes[1];
+		m_ents[ent].m_d[2] = nodes[2];
+		m_ents[ent].m_d[3] = nodes[3];
 	}
 
-	void check(const Rectf &r, std::set<EntCol *> *o_cols)
+	void check(const Rectf &r, std::set<EntCol *> *o_cols) const
 	{
-		std::set<EntCol *> cols;
 		const float inc_bound = _computeIncBound(r);
 		// nodes may have duplicates
 		// FIXME: modify _descentToHarvestNocreate to take all four r corners at once
 		//   and ensure no time is wasted harvesting same nodes twice
 		QuadNode *nodes[4] = {
-			_descendToHarvestNocreate(inc_bound, r.left, r.top, &cols), _descendToHarvestNocreate(inc_bound, r.left + r.width, r.top, &cols),
-			_descendToHarvestNocreate(inc_bound, r.left, r.top + r.height, &cols), _descendToHarvestNocreate(inc_bound, r.left + r.width, r.top + r.height, &cols),
+			_descendToHarvestNocreate(inc_bound, r.left, r.top, o_cols), _descendToHarvestNocreate(inc_bound, r.left + r.width, r.top, o_cols),
+			_descendToHarvestNocreate(inc_bound, r.left, r.top + r.height, o_cols), _descendToHarvestNocreate(inc_bound, r.left + r.width, r.top + r.height, o_cols),
 		};
 		// FIXME: before calling _floodHarvestNocreate see to duplicates being filtered out
 		//   ensuring no time is wasted harvesting same nodes twice
 		for (size_t i = 0; i < 4; i++)
-			_floodHarvestNocreate(nodes[i], &cols);
-		*o_cols = std::move(cols);
+			_floodHarvestNocreate(nodes[i], o_cols);
 	}
 };
 
@@ -525,12 +562,12 @@ int main(int argc, char **argv)
 
 	std::vector<sf::Vertex> verts = verts_from_tris(doc_tris);
 
-	sp<QuadTree> qt(new QuadTree(1024, 16));
-	
-	for (size_t i = 0; i < doc_tris.size(); i++) {
-		sp<E1> e1(new E1(doc_tris[i].d[0], doc_tris[i].d[1], doc_tris[i].d[2]));
-		qt->insert(e1, e1->m_t.colRect());
-	}
+	std::vector<sp<EntCol> > es;
+
+	for (size_t i = 0; i < doc_tris.size(); i++)
+		es.push_back(sp<EntCol>(new E1(doc_tris[i].d[0], doc_tris[i].d[1], doc_tris[i].d[2])));
+
+	sp<const QuadTree> qt_static(QuadTree::createFromEntCol(1024, 16, es));
 	
 	sf::RenderWindow window(sf::VideoMode(800, 600), "SF");
 
@@ -576,7 +613,7 @@ int main(int argc, char **argv)
 		std::vector<sf::Vertex> colverts;
 		for (size_t i = 0; i < doc_tris.size(); i++) {
 			std::set<EntCol *> cols1;
-			qt->check(q0.colRect(), &cols1);
+			qt_static->check(q0.colRect(), &cols1);
 			for (auto it = cols1.begin(); it != cols1.end(); ++it) {
 				const Tri &q1 = *(*it)->colTri(0);
 				bool isect = triangles_intersect_4(q0, q1);

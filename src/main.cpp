@@ -56,6 +56,7 @@ typedef sf::Rect<float> Rectf;
 class Tri;
 
 bool triangles_intersect_4(const Tri &t0, const Tri &t1);
+bool triangles_intersect_4_offset(const sf::Vector2f &t0_offset, const Tri &t0, const Tri &t1);
 
 class ErrExc : std::runtime_error
 {
@@ -392,7 +393,7 @@ public:
 			_floodHarvestNocreate(nodes[i], o_cols);
 	}
 
-	bool checkFreeSpot(const EntCol &ec, const Rectf &r_ec, const std::set<EntCol *> &cols) const
+	bool checkFreeSpot(const sf::Vector2f &move_ec, const std::vector<Tri> &t_ec, const Rectf &r_ec, const std::set<EntCol *> &cols) const
 	{
 		for (auto it = cols.begin(); it != cols.end(); ++it) {
 			const Rectf &rr = (*it)->colRect();
@@ -400,9 +401,9 @@ public:
 			if (! r_ec.intersects(rr))
 				continue;
 			// tris-level collision
-			for (auto it2 = ec.colTri().begin(); it2 != ec.colTri().end(); ++it2)
+			for (auto it2 = t_ec.begin(); it2 != t_ec.end(); ++it2)
 				for (auto it3 = (*it)->colTri().begin(); it3 != (*it)->colTri().end(); ++it3)
-					if (triangles_intersect_4(*it2, *it3))
+					if (triangles_intersect_4_offset(move_ec, *it2, *it3))
 						return false;
 		}
 		return true;
@@ -410,6 +411,7 @@ public:
 
 	sf::Vector2f checkSimulate(const EntCol &ec, const sf::Vector2f &move, const sf::Vector2f &extramove) const
 	{
+		const std::vector<Tri> &t_ec = ec.colTri();
 		const Rectf &r_ec = ec.colRect();
 		// movements max_move limited per-axis not by vector magnitude
 		const sf::Vector2f cur(r_ec.left, r_ec.top);
@@ -425,18 +427,18 @@ public:
 		if (cols.empty())
 			return nxt;
 		// FIXME: do actual collision check
-		sf::Vector2f cw = nxt;
-		sf::Vector2f ccw = nxt;
+		sf::Vector2f cw = mv;
+		sf::Vector2f ccw = mv;
 		for (size_t i = 0; i < 5; i++) {
 			cw = m_cw.transformPoint(cw);
 			ccw = m_ccw.transformPoint(cw);
 			const sf::Vector2f& n_cw = mv + cw;
-			const Rectf r_cw(n_cw.x, n_cw.y, r_ec.width, r_ec.height);
-			if (checkFreeSpot(ec, r_cw, cols))
-				return cw;
 			const sf::Vector2f& n_ccw = mv + ccw;
+			const Rectf r_cw(n_cw.x, n_cw.y, r_ec.width, r_ec.height);
 			const Rectf r_ccw(n_ccw.x, n_ccw.y, r_ec.width, r_ec.height);
-			if (checkFreeSpot(ec, r_ccw, cols))
+			if (checkFreeSpot(n_cw, t_ec, r_ec, cols))
+				return cw;
+			if (checkFreeSpot(n_ccw, t_ec, r_ccw, cols))
 				return ccw;
 		}
 		// no free spot - stay still
@@ -579,47 +581,6 @@ std::vector<sf::Vertex> verts_from_tris(const std::vector<Tri> &t)
 	return v;
 }
 
-float cross2(const Tri &points, const Tri &triangle)
-{
-	// https://stackoverflow.com/questions/2778240/detection-of-triangle-collision-in-2d-space/44269990#44269990
-	auto pa = points.d[0];
-	auto pb = points.d[1];
-	auto pc = points.d[2];
-	auto p0 = triangle.d[0];
-	auto p1 = triangle.d[1];
-	auto p2 = triangle.d[2];
-	auto dXa = pa.x - p2.x;
-	auto dYa = pa.y - p2.y;
-	auto dXb = pb.x - p2.x;
-	auto dYb = pb.y - p2.y;
-	auto dXc = pc.x - p2.x;
-	auto dYc = pc.y - p2.y;
-	auto dX21 = p2.x - p1.x;
-	auto dY12 = p1.y - p2.y;
-	auto dX02 = p0.x - p2.x;
-	auto dY20 = p2.y - p0.y;
-	auto D = dY12 * dX02 - dX21 * dY20;
-	auto sa = dY12 * dXa + dX21 * dYa;
-	auto sb = dY12 * dXb + dX21 * dYb;
-	auto sc = dY12 * dXc + dX21 * dYc;
-	auto ta = dY20 * dXa + dX02 * dYa;
-	auto tb = dY20 * dXb + dX02 * dYb;
-	auto tc = dY20 * dXc + dX02 * dYc;
-	if (D < 0) return ((sa >= 0 && sb >= 0 && sc >= 0) ||
-		(ta >= 0 && tb >= 0 && tc >= 0) ||
-		(sa+ta <= D && sb+tb <= D && sc+tc <= D));
-	return ((sa <= 0 && sb <= 0 && sc <= 0) ||
-		(ta <= 0 && tb <= 0 && tc <= 0) ||
-		(sa+ta >= D && sb+tb >= D && sc+tc >= D));
-}
-
-bool triangles_intersect_4(const Tri &t0, const Tri &t1)
-{
-	// https://stackoverflow.com/questions/2778240/detection-of-triangle-collision-in-2d-space/44269990#44269990
-	return !(cross2(t0,t1) ||
-		cross2(t1,t0));
-}
-
 int main(int argc, char **argv)
 {
 	std::string resource_path = resource_path_find();
@@ -653,6 +614,7 @@ int main(int argc, char **argv)
 	sp<const QuadTree> qt_static(QuadTree::createFromEntCol(1024, 16, es.begin(), es.end()));
 	
 	sp<E2> e2(new E2(data_path, Rectf(0, 0, 50, 50)));
+	sp<E2> e2fall(new E2(data_path, Rectf(400, 0, 50, 50)));
 
 	sf::RenderWindow window(sf::VideoMode(800, 600), "SF");
 
@@ -693,8 +655,10 @@ int main(int argc, char **argv)
 
 		window.draw(vb);
 
+		e2fall->m_img->setPosition(e2fall->m_img->getDim().left, e2fall->m_img->getDim().top + 5);
+
 		std::vector<sf::Vertex> colverts;
-		for (size_t i = 0; i < doc_tris.size(); i++) {
+		{
 			std::set<EntCol *> cols1;
 			qt_static->check(e2->colRect(), &cols1);
 			for (auto it = cols1.begin(); it != cols1.end(); ++it) {
@@ -710,6 +674,7 @@ int main(int argc, char **argv)
 		window.draw(colverts.data(), colverts.size(), sf::Triangles);
 
 		window.draw(*e2->m_img->m_spr);
+		window.draw(*e2fall->m_img->m_spr);
 
 		window.display();
 	}

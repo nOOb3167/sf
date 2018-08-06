@@ -430,15 +430,17 @@ public:
 		for (size_t i = 0; i < 5; i++) {
 			cw = m_cw.transformPoint(cw);
 			ccw = m_ccw.transformPoint(cw);
-			const Rectf r_cw(cw.x, cw.y, r_ec.width, r_ec.height);
+			const sf::Vector2f& n_cw = mv + cw;
+			const Rectf r_cw(n_cw.x, n_cw.y, r_ec.width, r_ec.height);
 			if (checkFreeSpot(ec, r_cw, cols))
 				return cw;
-			const Rectf r_ccw(ccw.x, ccw.y, r_ec.width, r_ec.height);
+			const sf::Vector2f& n_ccw = mv + ccw;
+			const Rectf r_ccw(n_ccw.x, n_ccw.y, r_ec.width, r_ec.height);
 			if (checkFreeSpot(ec, r_ccw, cols))
 				return ccw;
 		}
 		// no free spot - stay still
-		return sf::Vector2f(r_ec.top, r_ec.left);
+		return cur;
 	}
 };
 

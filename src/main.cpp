@@ -110,7 +110,8 @@ public:
 		m_img(new sf::Image()),
 		m_tex(new sf::Texture()),
 		m_spr(),
-		m_dim(dim)
+		m_dim(dim),
+		m_dim_tris(2)
 	{
 		if (! m_img->loadFromFile(fname))
 			XASRT(0);
@@ -164,13 +165,13 @@ public:
 	sp<sf::Texture> m_tex;
 	sp<sf::Sprite> m_spr;
 	Rectf m_dim;
-	Tri m_dim_tris[2];
+	std::vector<Tri> m_dim_tris;
 };
 
 class EntCol
 {
 public:
-	virtual const Tri* colTri(size_t a) const = 0;
+	virtual const std::vector<Tri> & colTri() const = 0;
 
 	Rectf colRect() const
 	{
@@ -178,13 +179,11 @@ public:
 		float Mx = -std::numeric_limits<float>::infinity();
 		float my = std::numeric_limits<float>::infinity();
 		float My = -std::numeric_limits<float>::infinity();
-		const Tri *f = nullptr;
-		for (size_t i = 0; (f = colTri(i)); i++) {
-			XASRT(i < DF_ENTCOL_MAX_TRIS);
-			mx = GS_MIN(mx, GS_MIN(f->d[0].x, GS_MIN(f->d[1].x, f->d[2].x)));
-			Mx = GS_MAX(Mx, GS_MAX(f->d[0].x, GS_MAX(f->d[1].x, f->d[2].x)));
-			my = GS_MIN(my, GS_MIN(f->d[0].y, GS_MIN(f->d[1].y, f->d[2].y)));
-			My = GS_MAX(My, GS_MAX(f->d[0].y, GS_MAX(f->d[1].y, f->d[2].y)));
+		for (auto it = colTri().begin(); it != colTri().end(); ++it) {
+			mx = GS_MIN(mx, GS_MIN(it->d[0].x, GS_MIN(it->d[1].x, it->d[2].x)));
+			Mx = GS_MAX(Mx, GS_MAX(it->d[0].x, GS_MAX(it->d[1].x, it->d[2].x)));
+			my = GS_MIN(my, GS_MIN(it->d[0].y, GS_MIN(it->d[1].y, it->d[2].y)));
+			My = GS_MAX(My, GS_MAX(it->d[0].y, GS_MAX(it->d[1].y, it->d[2].y)));
 		}
 		Rectf r(mx, my, Mx - mx, My - my);
 		return r;
@@ -197,20 +196,20 @@ class E1 : public EntCol
 {
 public:
 	E1(const sf::Vector2f &a, const sf::Vector2f &b, const sf::Vector2f &c) :
-		m_t()
+		m_t(1)
 	{
-		m_t.d[0] = a;
-		m_t.d[1] = b;
-		m_t.d[2] = c;
+		m_t[0].d[0] = a;
+		m_t[0].d[1] = b;
+		m_t[0].d[2] = c;
 	}
 
-	virtual const Tri* colTri(size_t a) const override
+	virtual const std::vector<Tri> & colTri() const override
 	{
-		return a == 0 ? &m_t : nullptr;
+		return m_t;
 	}
 
 public:
-	Tri m_t;
+	std::vector<Tri> m_t;
 };
 
 class E2 : public EntCol
@@ -220,9 +219,9 @@ public:
 		m_img(new Img(rel(data_path, "e2_0.png").c_str(), dim))
 	{}
 
-	virtual const Tri* colTri(size_t a) const override
+	virtual const std::vector<Tri> & colTri() const override
 	{
-		return a < 2 ? &m_img->m_dim_tris[a] : nullptr;
+		return m_img->m_dim_tris;
 	}
 
 public:
@@ -401,15 +400,10 @@ public:
 			if (! r_ec.intersects(rr))
 				continue;
 			// tris-level collision
-			const Tri *t = nullptr;
-			const Tri *tt = nullptr;
-			for (size_t i = 0; (t = ec.colTri(i)); i++)
-				for (size_t ii = 0; (tt = (*it)->colTri(ii)); ii++) {
-					XASRT(i < DF_ENTCOL_MAX_TRIS && ii < DF_ENTCOL_MAX_TRIS);
-					bool isect = triangles_intersect_4(*t, *tt);
-					if (isect)
+			for (auto it2 = ec.colTri().begin(); it2 != ec.colTri().end(); ++it2)
+				for (auto it3 = (*it)->colTri().begin(); it3 != (*it)->colTri().end(); ++it3)
+					if (triangles_intersect_4(*it2, *it3))
 						return false;
-			}
 		}
 		return true;
 	}
@@ -702,16 +696,13 @@ int main(int argc, char **argv)
 			std::set<EntCol *> cols1;
 			qt_static->check(e2->colRect(), &cols1);
 			for (auto it = cols1.begin(); it != cols1.end(); ++it) {
-				const Tri &q1 = *(*it)->colTri(0);
-				bool isect = triangles_intersect_4(*e2->colTri(0), q1);
+				// FIXME: obsolete colTri 0 code
+				const Tri &q1 = (*it)->colTri()[0];
+				bool isect = triangles_intersect_4(e2->colTri()[0], q1);
 				if (isect)
 					for (size_t j = 0; j < 3; j++)
 						colverts.push_back(sf::Vertex(q1.d[j], sf::Color(255, 255, 0)));
 			}
-			//bool is2 = triangles_intersect_4(q0, doc_tris[i]);
-			//if (is2)
-			//	for (size_t j = 0; j < 3; j++)
-			//		colverts.push_back(sf::Vertex(doc_tris[i].d[j], sf::Color(255, 255, 0)));
 		}
 
 		window.draw(colverts.data(), colverts.size(), sf::Triangles);

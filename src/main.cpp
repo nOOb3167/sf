@@ -393,17 +393,18 @@ public:
 			_floodHarvestNocreate(nodes[i], o_cols);
 	}
 
-	bool checkFreeSpot(const sf::Vector2f &move_ec, const std::vector<Tri> &t_ec, const Rectf &r_ec, const std::set<EntCol *> &cols) const
+	bool checkFreeSpot(const sf::Vector2f &offset_ec, const std::vector<Tri> &t_ec, const Rectf &r_ec, const std::set<EntCol *> &cols) const
 	{
+		const Rectf r(r_ec.left + offset_ec.x, r_ec.top + offset_ec.y, r_ec.width, r_ec.height);
 		for (auto it = cols.begin(); it != cols.end(); ++it) {
 			const Rectf &rr = (*it)->colRect();
 			// rect-level collision
-			if (! r_ec.intersects(rr))
+			if (! r.intersects(rr))
 				continue;
 			// tris-level collision
 			for (auto it2 = t_ec.begin(); it2 != t_ec.end(); ++it2)
 				for (auto it3 = (*it)->colTri().begin(); it3 != (*it)->colTri().end(); ++it3)
-					if (triangles_intersect_4_offset(move_ec, *it2, *it3))
+					if (triangles_intersect_4_offset(offset_ec, *it2, *it3))
 						return false;
 		}
 		return true;
@@ -411,6 +412,10 @@ public:
 
 	sf::Vector2f checkSimulate(const EntCol &ec, const sf::Vector2f &move, const sf::Vector2f &extramove) const
 	{
+		// FIXME: imagine ec just above an obstacle and moving down by 5.
+		//   ends up embedded by 4 inside obstacle.
+		//   cw,ccw must be practically 180deg reverse to backtrack out.
+		//   recommend adding a scale factor to cw,ccw.
 		const std::vector<Tri> &t_ec = ec.colTri();
 		const Rectf &r_ec = ec.colRect();
 		// movements max_move limited per-axis not by vector magnitude
@@ -419,27 +424,23 @@ public:
 		const sf::Vector2f &twicemv = mv * 2.0f;
 		const sf::Vector2f &nxt = cur + mv;
 		XASRT(fabsf(mv.x) < DF_ENTCOL_MAX_MOVE && fabsf(mv.y) < DF_ENTCOL_MAX_MOVE);
-		const Rectf r_nxt(nxt.x, nxt.y, r_ec.width, r_ec.height);
 		const Rectf r_nxt_expanded(nxt.x - mv.x, nxt.y - mv.y, r_ec.width + twicemv.x, r_ec.height + twicemv.y);
 		std::set<EntCol *> cols;
-		// FIXME: possibly check vs r_nxt and go for r_nxt_expanded only on a hit
+		// FIXME: (perf) possibly check vs r_nxt and go for r_nxt_expanded only on a hit
 		check(r_nxt_expanded, &cols);
 		if (cols.empty())
 			return nxt;
-		// FIXME: do actual collision check
+		if (checkFreeSpot(mv, t_ec, r_ec, cols))
+			return nxt;
 		sf::Vector2f cw = mv;
 		sf::Vector2f ccw = mv;
-		for (size_t i = 0; i < 5; i++) {
+		for (size_t i = 0; i < 8; i++) {
 			cw = m_cw.transformPoint(cw);
-			ccw = m_ccw.transformPoint(cw);
-			const sf::Vector2f& n_cw = mv + cw;
-			const sf::Vector2f& n_ccw = mv + ccw;
-			const Rectf r_cw(n_cw.x, n_cw.y, r_ec.width, r_ec.height);
-			const Rectf r_ccw(n_ccw.x, n_ccw.y, r_ec.width, r_ec.height);
-			if (checkFreeSpot(n_cw, t_ec, r_ec, cols))
-				return cw;
-			if (checkFreeSpot(n_ccw, t_ec, r_ccw, cols))
-				return ccw;
+			ccw = m_ccw.transformPoint(ccw);
+			if (checkFreeSpot(cw, t_ec, r_ec, cols))
+				return cur + cw;
+			if (checkFreeSpot(ccw, t_ec, r_ec, cols))
+				return cur + ccw;
 		}
 		// no free spot - stay still
 		return cur;
@@ -655,7 +656,10 @@ int main(int argc, char **argv)
 
 		window.draw(vb);
 
-		e2fall->m_img->setPosition(e2fall->m_img->getDim().left, e2fall->m_img->getDim().top + 5);
+		{
+			const sf::Vector2f &newpos = qt_static->checkSimulate(*e2fall, sf::Vector2f(0, 5), sf::Vector2f(0, 0));
+			e2fall->m_img->setPosition(newpos.x, newpos.y);
+		}
 
 		std::vector<sf::Vertex> colverts;
 		{

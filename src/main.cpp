@@ -193,6 +193,43 @@ public:
 
 typedef ::std::map<sp<EntCol>, size_t> ent_map_t;
 
+class ImgCurve
+{
+public:
+	ImgCurve(const char *fname) :
+		m_img(new sf::Image()),
+		m_size(),
+		m_pts()
+	{
+		if (! m_img->loadFromFile(fname))
+			XASRT(0);
+		m_size = sf::Vector2f(m_img->getSize().x, m_img->getSize().y);
+		m_pts = std::vector<float>(m_size.x);
+		float ym1 = m_size.y - 1;
+		for (size_t x = 0; x < m_size.x; x++) {
+			float num_transparent = 0;
+			for (size_t y = 0; y < m_size.y; y++)
+				if (m_img->getPixel(x, ym1 - y).a == 0)
+					num_transparent++;
+				else
+					break;
+			m_pts[x] = num_transparent;
+		}
+		m_pts_inc = std::vector<float>(m_size.x);
+		float cur_lvl = 0;
+		for (size_t x = 0; x < m_size.x; x++) {
+			m_pts_inc[x] = m_pts[x] - cur_lvl;
+			cur_lvl = m_pts[x];
+		}
+	}
+
+public:
+	sp<sf::Image> m_img;
+	sf::Vector2f m_size;
+	std::vector<float> m_pts;
+	std::vector<float> m_pts_inc;
+};
+
 class E1 : public EntCol
 {
 public:
@@ -434,7 +471,7 @@ public:
 			return nxt;
 		sf::Vector2f cw = mv;
 		sf::Vector2f ccw = mv;
-		for (size_t i = 0; i < 8; i++) {
+		for (size_t i = 0; i < 3; i++) {
 			cw = m_cw.transformPoint(cw);
 			ccw = m_ccw.transformPoint(ccw);
 			if (checkFreeSpot(cw, t_ec, r_ec, cols))
@@ -617,6 +654,8 @@ int main(int argc, char **argv)
 	sp<E2> e2(new E2(data_path, Rectf(0, 0, 50, 50)));
 	sp<E2> e2fall(new E2(data_path, Rectf(400, 0, 50, 50)));
 
+	sp<ImgCurve> cur0(new ImgCurve(rel(data_path, "cur0.png").c_str()));
+
 	sf::RenderWindow window(sf::VideoMode(800, 600), "SF");
 
 	window.setMouseCursorGrabbed(true);
@@ -632,6 +671,9 @@ int main(int argc, char **argv)
 	tb.d[0] = sf::Vector2f(0, 0);
 	tb.d[1] = sf::Vector2f(50, 0);
 	tb.d[2] = sf::Vector2f(50, 50);
+
+	sf::Vector2f curgravity(0, 5);
+	size_t jumping = -1;
 
 	while (window.isOpen()) {
 		sf::Event event;
@@ -656,8 +698,31 @@ int main(int argc, char **argv)
 
 		window.draw(vb);
 
+		sf::Vector2f wantmove;
+		bool wantjump = false;
+
+		if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::A))
+			wantmove.x -= 5;
+		if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::D))
+			wantmove.x += 5;
+		if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Space))
+			wantjump = true;
+
+		if (wantjump && jumping == -1)
+			jumping = 0;
+		if (jumping == cur0->m_size.x) {
+			jumping = -1;
+			curgravity = sf::Vector2f(0, 5);
+		}
+		if (jumping >= 0 && jumping < cur0->m_size.x) {
+			printf("[%4d] [%8f] [%8f] [%8f]\n", (int)jumping, cur0->m_pts_inc[jumping], wantmove.y, e2fall->m_img->getDim().top);
+			wantmove.y += cur0->m_pts_inc[jumping];
+			jumping++;
+			curgravity = sf::Vector2f(0, 0);
+		}
+
 		{
-			const sf::Vector2f &newpos = qt_static->checkSimulate(*e2fall, sf::Vector2f(0, 5), sf::Vector2f(0, 0));
+			const sf::Vector2f &newpos = qt_static->checkSimulate(*e2fall, wantmove, curgravity);
 			e2fall->m_img->setPosition(newpos.x, newpos.y);
 		}
 

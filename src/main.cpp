@@ -715,8 +715,7 @@ int main(int argc, char **argv)
 			curgravity = sf::Vector2f(0, 5);
 		}
 		if (jumping >= 0 && jumping < cur0->m_size.x) {
-			printf("[%4d] [%8f] [%8f] [%8f]\n", (int)jumping, cur0->m_pts_inc[jumping], wantmove.y, e2fall->m_img->getDim().top);
-			wantmove.y += cur0->m_pts_inc[jumping];
+			wantmove.y -= cur0->m_pts_inc[jumping];
 			jumping++;
 			curgravity = sf::Vector2f(0, 0);
 		}
